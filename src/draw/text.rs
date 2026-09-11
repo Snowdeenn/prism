@@ -67,7 +67,7 @@ pub struct TextRenderer {
 
 impl TextRenderer {
     pub fn new(ctx: &GpuContext, surface_format: wgpu::TextureFormat) -> Self {
-        let mut cache_text = TextBufferCache::new();
+        let cache_text = TextBufferCache::new();
         let swash_cache = glyphon::SwashCache::new();
         let cache = &glyphon::Cache::new(&ctx.device);
         let viewport = glyphon::Viewport::new(&ctx.device, cache);
@@ -78,15 +78,6 @@ impl TextRenderer {
             wgpu::MultisampleState::default(),
             None,
         );
-
-        cache_text
-            .font_system
-            .db_mut()
-            .load_font_data(include_bytes!("../../../assets/pixel/Pixel Coleco.otf").to_vec());
-        cache_text
-            .font_system
-            .db_mut()
-            .set_sans_serif_family("Pixel Coleco");
 
         Self {
             cache_text,

@@ -26,7 +26,7 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use utils::math::Mat4;
+use math::Mat4;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers : conversion coordonnées écran → clip space

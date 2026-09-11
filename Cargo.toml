@@ -12,7 +12,7 @@ crossbeam = "0.8"
 image = "0.25"
 bytemuck = "1"
 thiserror = "2.0.19"
-utils = { path = "../utils" }
+math = { git = "https://github.com/Snowdeenn/math.git" }
 tracing = "0.1"
 weave = { git = "https://github.com/Snowdeenn/weave.git" }
 

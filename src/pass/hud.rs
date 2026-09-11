@@ -580,13 +580,13 @@ impl Pass for HudPass {
         }
 
         // Resize index buffer
-        let required_index_bytes = self.mesh.vertices().len() as u64
-            * std::mem::size_of::<crate::geometry::mesh::Vertex>() as u64;
+        let required_index_bytes =
+            self.mesh.indices().len() as u64 * std::mem::size_of::<u32>() as u64;
 
         if required_index_bytes > self.index_buffer_size {
-            self.vertex_buffer_size = (self.vertex_buffer_size * 2).max(required_index_bytes);
+            self.index_buffer_size = (self.index_buffer_size * 2).max(required_index_bytes);
             tracing::info!(
-                new_size = self.vertex_buffer_size,
+                new_size = self.index_buffer_size,
                 "Agrandissement de l'index Buffer dans HudPass"
             );
             let former = self.index_buffer;

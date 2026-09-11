@@ -1,14 +1,23 @@
+extern crate self as utils;
+
+pub mod arena;
 mod context;
-mod draw;
+pub mod draw;
 mod errors;
 mod frame;
 mod geometry;
+pub mod ids;
+pub mod math {
+    pub use ::math::*;
+}
 mod pass;
 mod renderer;
 mod resource;
 
 pub use context::GpuContext;
-pub use draw::{batch::DrawCommandBuffer, commands::DrawCommand, text::TextRenderer};
+pub use draw::{
+    batch::DrawCommandBuffer, colors::Color, commands::DrawCommand, text::TextRenderer,
+};
 pub use errors::*;
 pub use errors::{GpuContextError, TextRendererError};
 pub use frame::{frame::Frame, frame::FrameContext, manager::FrameManager};

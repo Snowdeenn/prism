@@ -113,7 +113,7 @@ impl GpuResources {
         self.buffer.get(id)
     }
     pub fn get_buffer_mut(&mut self, id: utils::ids::BufferId) -> Option<&mut crate::GpuBuffer> {
-        self.get_buffer_mut(id)
+        self.buffer.get_mut(id)
     }
     pub fn write_buffer(
         &mut self,

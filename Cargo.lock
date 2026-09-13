@@ -3029,7 +3029,7 @@ dependencies = [
 [[package]]
 name = "weave"
 version = "0.1.0"
-source = "git+https://github.com/Snowdeenn/weave.git#3618e445ccda2a325a30d45be4e72ec50750ff2c"
+source = "git+https://github.com/Snowdeenn/weave.git?rev=767c851#767c851a11a6f94b1b8f801440386b32798e500c"
 
 [[package]]
 name = "web-sys"

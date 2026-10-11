@@ -13,6 +13,8 @@ pub mod math {
 mod pass;
 mod renderer;
 mod resource;
+mod bindings;
+mod pipeline;
 
 pub use context::GpuContext;
 pub use draw::{

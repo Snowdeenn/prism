@@ -33,6 +33,10 @@ impl RawMesh {
         idx as u32
     }
 
+    pub fn push_index(&mut self, idx: u32) {
+        self.indices.push(idx);
+    }
+
     pub fn push_triangle(&mut self, a: u32, b: u32, c: u32) {
         self.indices.push(a);
         self.indices.push(b);

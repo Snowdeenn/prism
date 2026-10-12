@@ -1,3 +1,4 @@
+use crate::bindings::{BindingEntryDesc, BindingKind, BindingSchema, GroupSchema};
 use std::collections::HashMap;
 use std::sync::Arc;
 use utils::ids::ShaderId;
@@ -46,141 +47,161 @@ pub enum VertexFormat {
     Pos2UvColor, // [Vec2 pos, Vec2 uv, Vec4 color] — sprites
 }
 
+/// Compatibility facade backed by the V2 structural caches.
 pub struct PipelineManager {
-    pipelines: HashMap<PipelineKey, Arc<wgpu::RenderPipeline>>,
+    cache: Option<crate::pipeline::PipelineCache>,
+    device: Option<wgpu::Device>,
     layouts: HashMap<PipelineKey, Vec<wgpu::BindGroupLayout>>,
     surface_format: wgpu::TextureFormat,
 }
-
 impl PipelineManager {
     pub fn new(surface_format: wgpu::TextureFormat) -> Self {
         Self {
-            pipelines: HashMap::new(),
+            cache: None,
+            device: None,
             layouts: HashMap::new(),
             surface_format,
         }
     }
-
     pub fn get_or_create(
         &mut self,
         ctx: &GpuContext,
-        gpu_resources: &GpuResources,
+        resources: &GpuResources,
         key: PipelineKey,
     ) -> Result<Arc<wgpu::RenderPipeline>, PipelineError> {
-        if let Some(pipeline) = self.pipelines.get(&key) {
-            return Ok(pipeline.clone());
+        if self.device.as_ref() != Some(&ctx.device) {
+            self.cache = Some(crate::pipeline::PipelineCache::new(&ctx.device));
+            self.device = Some(ctx.device.clone());
+            self.layouts.clear();
         }
-
-        let _span = tracing::info_span!(
-            "PipelineManager::create_pipeline",
-            vs = %key.vertex_shader,
-            fs = %key.fragment_shader
-        )
-        .entered();
-
-        let layouts = Self::create_bind_group_layouts(ctx, &key);
-        let pipeline = self.create_pipeline(ctx, gpu_resources, &key, &layouts)?;
-        let pipeline_arc = Arc::new(pipeline);
-
-        self.layouts.insert(key.clone(), layouts);
-        self.pipelines.insert(key, pipeline_arc.clone());
-
-        tracing::info!("Nouvelle RenderPipeline WGPU compilé et mis en cache");
-        Ok(pipeline_arc)
+        let vertex =
+            resources
+                .get_shader(key.vertex_shader)
+                .ok_or(PipelineError::ShaderNotFound {
+                    id: key.vertex_shader,
+                })?;
+        let fragment =
+            resources
+                .get_shader(key.fragment_shader)
+                .ok_or(PipelineError::ShaderNotFound {
+                    id: key.fragment_shader,
+                })?;
+        let schema = Self::schema(&key);
+        let vertex_layout = Self::vertex_layout(key.vertex_format);
+        let full_key = crate::pipeline::PipelineKey {
+            vertex: crate::pipeline::ShaderStageKey::new(
+                crate::pipeline::ShaderRevisionKey {
+                    shader: key.vertex_shader,
+                    revision: vertex.revision,
+                },
+                "vs_main",
+            ),
+            fragment: Some(crate::pipeline::ShaderStageKey::new(
+                crate::pipeline::ShaderRevisionKey {
+                    shader: key.fragment_shader,
+                    revision: fragment.revision,
+                },
+                "fs_main",
+            )),
+            layout: schema.clone(),
+            vertex_layouts: vec![Some(crate::pipeline::VertexLayout {
+                stride: vertex_layout.array_stride,
+                step_mode: vertex_layout.step_mode,
+                attributes: vertex_layout.attributes.to_vec(),
+            })],
+            primitive: Default::default(),
+            depth_stencil: None,
+            targets: vec![Some(wgpu::ColorTargetState {
+                format: self.surface_format,
+                blend: Self::blend_mode(key.blend_mode),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            multisample: Default::default(),
+            multiview_mask: None,
+        };
+        let cache = self.cache.as_mut().expect("cache initialized above");
+        cache.retain_shaders(|key| {
+            resources
+                .get_shader(key.shader)
+                .is_some_and(|s| s.revision == key.revision)
+        });
+        let pipeline = cache
+            .render(
+                "legacy material",
+                &full_key,
+                &vertex.module,
+                Some(&fragment.module),
+            )
+            .map_err(|e| PipelineError::Validation(e.to_string()))?;
+        let layout = cache
+            .layouts
+            .resolve("legacy material", &schema)
+            .map_err(|e| PipelineError::Validation(e.to_string()))?;
+        self.layouts.insert(
+            key,
+            layout
+                .groups
+                .into_iter()
+                .flatten()
+                .map(|g| (*g).clone())
+                .collect(),
+        );
+        Ok(pipeline)
     }
-
-    pub fn invalidate_shader(&mut self, shader_id: ShaderId) {
-        tracing::debug!(shader_id = %shader_id, "Invalidation des pipelines associés au shader");
-
-        self.pipelines
-            .retain(|key, _| key.vertex_shader != shader_id && key.fragment_shader != shader_id);
-        self.layouts
-            .retain(|key, _| key.vertex_shader != shader_id && key.fragment_shader != shader_id);
+    pub fn invalidate_shader(&mut self, id: ShaderId) {
+        if let Some(cache) = &mut self.cache {
+            cache.invalidate_shader(id);
+        }
     }
-
     pub fn invalidate_all(&mut self) {
-        tracing::debug!("Vidage complet du cache des pipelines");
-        self.pipelines.clear();
+        if let Some(cache) = &mut self.cache {
+            cache.clear();
+        }
         self.layouts.clear();
     }
-
     pub fn get_layouts(&self, key: &PipelineKey) -> Option<&[wgpu::BindGroupLayout]> {
-        self.layouts.get(key).map(|v| v.as_slice())
+        self.layouts.get(key).map(Vec::as_slice)
     }
-
-    fn create_pipeline(
-        &self,
-        ctx: &GpuContext,
-        gpu_resources: &GpuResources,
-        key: &PipelineKey,
-        bind_group_layouts: &[wgpu::BindGroupLayout],
-    ) -> Result<wgpu::RenderPipeline, PipelineError> {
-        let blend_mode = Self::blend_mode(key.blend_mode);
-        let vertex_format = Self::vertex_layout(key.vertex_format);
-
-        let vertex_shader = gpu_resources.get_shader(key.vertex_shader).ok_or_else(|| {
-            tracing::error!(id = %key.vertex_shader, "Vertex shader introuvable lors de la création du pipeline");
-            PipelineError::ShaderNotFound { id: key.vertex_shader }
-        })?;
-
-        let frag_shader = gpu_resources.get_shader(key.fragment_shader).ok_or_else(|| {
-            tracing::error!(id = %key.fragment_shader, "Fragment shader introuvable lors de la création du pipeline");
-            PipelineError::ShaderNotFound { id: key.fragment_shader }
-        })?;
-
-        let bind_group_layout_refs: Vec<Option<&wgpu::BindGroupLayout>> =
-            bind_group_layouts.iter().map(Some).collect();
-
-        let layout_label = format!(
-            "PipelineLayout (Vertex Shader:{}, Fragement Shader:{})",
-            key.vertex_shader, key.fragment_shader
-        );
-        let pipeline_label = format!(
-            "RenderPipeline (Vertex Shader:{}, Fragement Shader:{}, Blend:{:?}, Format:{:?})",
-            key.vertex_shader, key.fragment_shader, key.blend_mode, key.vertex_format
-        );
-
-        let pipeline_layout = ctx
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&layout_label),
-                bind_group_layouts: &bind_group_layout_refs,
-                immediate_size: 0,
-            });
-
-        Ok(ctx
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&pipeline_label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_shader.module,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(vertex_format)],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    ..Default::default()
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &frag_shader.module,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.surface_format,
-                        blend: blend_mode,
-                        write_mask: wgpu::ColorWrites::all(),
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            }))
+    fn schema(key: &PipelineKey) -> BindingSchema {
+        BindingSchema {
+            groups: key
+                .bind_groups
+                .iter()
+                .enumerate()
+                .map(|(index, entries)| GroupSchema {
+                    index: index as u32,
+                    entries: entries
+                        .iter()
+                        .map(|e| BindingEntryDesc {
+                            binding: e.binding,
+                            visibility: e.visibility,
+                            count: None,
+                            kind: match e.ty {
+                                BindingTypeKey::UniformBuffer => BindingKind::Uniform {
+                                    min_size: 0,
+                                    dynamic_offset: false,
+                                },
+                                BindingTypeKey::DynamicUniformBuffer => BindingKind::Uniform {
+                                    min_size: 0,
+                                    dynamic_offset: true,
+                                },
+                                BindingTypeKey::Texture2D => BindingKind::Texture {
+                                    sample_type: wgpu::TextureSampleType::Float {
+                                        filterable: true,
+                                    },
+                                    dimension: wgpu::TextureViewDimension::D2,
+                                    multisampled: false,
+                                },
+                                BindingTypeKey::Sampler => BindingKind::Sampler {
+                                    kind: wgpu::SamplerBindingType::Filtering,
+                                },
+                            },
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
     }
-
     fn blend_mode(mode: BlendMode) -> Option<wgpu::BlendState> {
         match mode {
             BlendMode::Additive => Some(wgpu::BlendState {
@@ -254,56 +275,5 @@ impl PipelineManager {
                 ],
             },
         }
-    }
-
-    fn create_bind_group_layouts(
-        ctx: &GpuContext,
-        key: &PipelineKey,
-    ) -> Vec<wgpu::BindGroupLayout> {
-        key.bind_groups
-            .iter()
-            .enumerate()
-            .map(|(index, entries)| {
-                let wgpu_entries: Vec<wgpu::BindGroupLayoutEntry> = entries
-                    .iter()
-                    .map(|e| wgpu::BindGroupLayoutEntry {
-                        binding: e.binding,
-                        visibility: e.visibility,
-                        ty: match e.ty {
-                            BindingTypeKey::UniformBuffer => wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            BindingTypeKey::Texture2D => wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            BindingTypeKey::Sampler => {
-                                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
-                            }
-                            BindingTypeKey::DynamicUniformBuffer => wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: true,
-                                min_binding_size: None,
-                            },
-                        },
-                        count: None,
-                    })
-                    .collect();
-
-                let group_label = format!(
-                    "BindGroupLayout #{} (Vertex Shader:{}, Fragement Shader:{})",
-                    index, key.vertex_shader, key.fragment_shader
-                );
-
-                ctx.device
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some(&group_label),
-                        entries: &wgpu_entries,
-                    })
-            })
-            .collect()
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    GpuResources, PassError, TextureManager,
+    GpuResources, PassError,
     context::GpuContext,
     draw::{commands::DrawCommand, text::TextRenderer},
     geometry::{mesh::RawMesh, shape::Shape, tesselator::Tesselator},
@@ -118,31 +118,6 @@ impl HudPass {
                     }],
                 });
 
-        // Layout texture group(1)
-        let texture_bind_group_layout =
-            ctx.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("HudPass Texture BindGroup Layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ],
-                });
-
         // Camera buffer group(0)
         let camera_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("HudPass Camera Uniform"),
@@ -158,7 +133,7 @@ impl HudPass {
             fragment_shader: frag_shader,
             blend_mode: BlendMode::Alpha,
             vertex_format: VertexFormat::Pos2UvColor,
-            bind_groups: &crate::TEXTURE_BIND_GROUP,
+            bind_groups: crate::TEXTURE_BIND_GROUP,
         };
 
         let default_pipeline = pipelines
@@ -172,6 +147,8 @@ impl HudPass {
             tracing::error!("Impossible d'obtenir les BindGroupLayouts pour la HudPass");
             PassError::LayoutsNotFound
         })?;
+
+        let texture_bind_group_layout = layouts.get(1).ok_or(PassError::LayoutsNotFound)?.clone();
 
         let camera_layout = layouts.first().ok_or_else(|| {
             tracing::error!("BindGroupLayout (Camera) manquant à l'index 0 pour la HudPass");
@@ -226,6 +203,21 @@ impl HudPass {
         })
     }
 
+    pub(crate) fn refresh_pipeline(
+        &mut self,
+        ctx: &GpuContext,
+        pipelines: &mut PipelineManager,
+        resources: &GpuResources,
+    ) -> Result<(), PassError> {
+        self.set_shader(
+            ctx,
+            pipelines,
+            resources,
+            self.vert_shader,
+            self.frag_shader,
+        )
+    }
+
     pub fn set_shader(
         &mut self,
         ctx: &GpuContext,
@@ -243,7 +235,7 @@ impl HudPass {
                     fragment_shader: frag_shader,
                     blend_mode: BlendMode::Alpha,
                     vertex_format: VertexFormat::Pos2UvColor,
-                    bind_groups: &crate::TEXTURE_BIND_GROUP,
+                    bind_groups: crate::TEXTURE_BIND_GROUP,
                 },
             )
             .map_err(|err| {
@@ -255,36 +247,6 @@ impl HudPass {
         self.vert_shader = vert_shader;
         self.frag_shader = frag_shader;
         Ok(())
-    }
-
-    fn create_texture_bind_group(
-        &self,
-        ctx: &GpuContext,
-        texture_id: TextureId,
-        textures: &TextureManager,
-    ) -> Option<wgpu::BindGroup> {
-        let gpu_tex = match textures.get(texture_id) {
-            Some(tex) => tex,
-            None => {
-                tracing::error!(id = %texture_id, "[HudPass] TextureId introuvable pour la création du BindGroup");
-                return None;
-            }
-        };
-
-        Some(ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("HudPass Texture BindGroup"),
-            layout: &self.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&gpu_tex.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&gpu_tex.sampler),
-                },
-            ],
-        }))
     }
 
     fn create_uniform_bind_group(&self, ctx: &GpuContext, size: u64) -> wgpu::BindGroup {
@@ -301,10 +263,6 @@ impl HudPass {
             }],
         })
     }
-}
-
-fn align256(size: usize) -> usize {
-    (size + 255) & !255
 }
 
 impl Pass for HudPass {
@@ -391,7 +349,18 @@ impl Pass for HudPass {
                 DrawCommand::Text { .. } => continue,
             };
 
-            let batch_changed = current_texture_id != Some(tex_id) || current_material_id != mat_id;
+            // Parameters are per command, even when adjacent commands share a material.
+            if let Some(data) = uniform_data {
+                if data.len() > 256 || !data.len().is_multiple_of(4) {
+                    tracing::error!(
+                        "Legacy HUD uniforms must fit the 256-byte binding; use FrameV2 for larger blocks"
+                    );
+                    continue;
+                }
+            }
+            let batch_changed = current_texture_id != Some(tex_id)
+                || current_material_id != mat_id
+                || mat_id.is_some();
 
             if batch_changed {
                 // Clore le batch précédent
@@ -431,7 +400,9 @@ impl Pass for HudPass {
                 if let Some(data) = uniform_data {
                     current_uniform_offset = scratch_offset as u32;
                     scratch_data.extend_from_slice(data);
-                    let aligned = align256(data.len());
+                    let alignment =
+                        ctx.device.limits().min_uniform_buffer_offset_alignment as usize;
+                    let aligned = data.len().max(256).div_ceil(alignment) * alignment;
                     scratch_data.resize(scratch_offset + aligned, 0);
                     scratch_offset += aligned;
                 }
@@ -537,6 +508,16 @@ impl Pass for HudPass {
 
         // Upload scratch buffer en une seule fois
         if !scratch_data.is_empty() {
+            if scratch_data.len() as u64 > self.scratch_buffer_size {
+                self.scratch_buffer_size = (scratch_data.len() as u64).next_power_of_two();
+                self.scratch_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("HUD parameters resized"),
+                    size: self.scratch_buffer_size,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.scratch_bind_group = self.create_uniform_bind_group(ctx, 256);
+            }
             ctx.queue
                 .write_buffer(&self.scratch_buffer, 0, &scratch_data);
         }
@@ -699,6 +680,7 @@ impl Pass for HudPass {
                             current_material = Some(*material_id);
                         } else {
                             tracing::warn!(id = %material_id, "[HudPass] Matériau introuvable lors de l'exécution du batch");
+                            continue;
                         }
                     }
                     pass.set_bind_group(1, texture_bind_group, &[]);

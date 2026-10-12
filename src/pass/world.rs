@@ -75,7 +75,7 @@ impl WorldPass {
             fragment_shader: frag_shader,
             blend_mode: BlendMode::Alpha,
             vertex_format: VertexFormat::Pos2UvColor,
-            bind_groups: &crate::TEXTURE_BIND_GROUP,
+            bind_groups: crate::TEXTURE_BIND_GROUP,
         };
 
         let pipeline = pipelines.get_or_create(ctx, gpu_resources, pipeline_key.clone())?;
@@ -99,29 +99,7 @@ impl WorldPass {
         });
 
         let batches = Vec::with_capacity(4096);
-        let texture_group_layout =
-            ctx.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("WorldPass Texture BindGroupLayout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ],
-                });
+        let texture_group_layout = layouts.get(1).ok_or(PassError::LayoutsNotFound)?.clone();
 
         tracing::info!("Passe de rendu WorldPass initialisée avec succès");
 
@@ -142,6 +120,21 @@ impl WorldPass {
         })
     }
 
+    pub(crate) fn refresh_pipeline(
+        &mut self,
+        ctx: &GpuContext,
+        pipelines: &mut PipelineManager,
+        resources: &GpuResources,
+    ) -> Result<(), PassError> {
+        self.set_shader(
+            ctx,
+            pipelines,
+            resources,
+            self.vert_shader,
+            self.frag_shader,
+        )
+    }
+
     pub fn set_shader(
         &mut self,
         ctx: &GpuContext,
@@ -158,7 +151,7 @@ impl WorldPass {
                 fragment_shader: frag_shader,
                 blend_mode: BlendMode::Alpha,
                 vertex_format: VertexFormat::Pos2UvColor,
-                bind_groups: &crate::TEXTURE_BIND_GROUP,
+                bind_groups: crate::TEXTURE_BIND_GROUP,
             },
         )?;
 
@@ -237,26 +230,7 @@ impl Pass for WorldPass {
             }
         };
 
-        let get_sort_key = |cmd: &DrawCommand| -> (u8, usize) {
-            match cmd {
-                DrawCommand::Texture { id, layer, .. } => (*layer, id.index),
-                DrawCommand::Shape { layer, .. } => (*layer, white_id.index),
-                DrawCommand::Mesh { layer, .. } => (*layer, white_id.index),
-                DrawCommand::Text { layer, .. } => (*layer, usize::MAX),
-                DrawCommand::Material {
-                    layer, texture_id, ..
-                } => (
-                    *layer,
-                    texture_id.map(|t| t.index).unwrap_or(white_id.index),
-                ),
-                DrawCommand::NinePatch { id, layer, .. } => (*layer, id.index),
-            }
-        };
-
-        input
-            .commands
-            .commands_mut()
-            .sort_by_key(|cmd| get_sort_key(cmd));
+        input.commands.sort_commands();
 
         let mut current_texture_id: Option<TextureId> = None;
         let mut batch_index_start = 0u32;
@@ -385,10 +359,6 @@ impl Pass for WorldPass {
         target: &wgpu::TextureView,
         gpu_resources: &GpuResources,
     ) {
-        if self.index_count == 0 {
-            return;
-        }
-
         let index_buffer = match gpu_resources.get_buffer(self.index_buffer) {
             Some(b) => b,
             None => {

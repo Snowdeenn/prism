@@ -82,7 +82,12 @@ impl GpuBufferManager {
             });
         }
 
-        ctx.queue.write_buffer(&buffer.buffer, 0, data);
+        if !data_len.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
+            return Err(BufferError::InvalidSize { size: data_len });
+        }
+        if !data.is_empty() {
+            ctx.queue.write_buffer(&buffer.buffer, 0, data);
+        }
         tracing::trace!(id = %id, bytes_written = data_len, "Mise à jour du buffer GPU");
         Ok(())
     }

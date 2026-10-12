@@ -117,6 +117,40 @@ pub enum BufferError {
 pub enum PipelineError {
     #[error("Shader introuvable pour la création du pipeline (ID : {id})")]
     ShaderNotFound { id: utils::ids::ShaderId },
+    #[error("{0}")]
+    Validation(String),
+}
+
+/// Recoverable description, resource, graph or GPU validation error in the V2 API.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[error("{context}: {message}")]
+pub struct RenderError {
+    pub context: String,
+    pub message: String,
+}
+
+impl RenderError {
+    pub fn new(context: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            context: context.into(),
+            message: message.into(),
+        }
+    }
+}
+
+pub type RenderResult<T> = std::result::Result<T, RenderError>;
+
+pub(crate) fn gpu_checked<T>(
+    device: &wgpu::Device,
+    label: &str,
+    create: impl FnOnce() -> T,
+) -> RenderResult<T> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let value = create();
+    match pollster::block_on(scope.pop()) {
+        Some(error) => Err(RenderError::new(label, error.to_string())),
+        None => Ok(value),
+    }
 }
 
 #[derive(Error, Debug)]

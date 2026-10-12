@@ -130,3 +130,6 @@ impl GpuResources {
         Ok(self.buffer.remove(id)?)
     }
 }
+
+pub mod manager;
+pub use manager::ResourceManager;

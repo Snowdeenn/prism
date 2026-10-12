@@ -5,6 +5,7 @@ use crate::context::GpuContext;
 use crate::errors::ShaderError;
 
 pub struct GpuShader {
+    pub revision: u64,
     pub module: wgpu::ShaderModule,
     pub path: Option<String>, // None si créé depuis du code inline
 }
@@ -38,6 +39,7 @@ impl ShaderManager {
             });
         let id = self.shaders.insert(GpuShader {
             module,
+            revision: 0,
             path: Some(path.to_string()),
         });
         tracing::info!(?id, "Shader WGSL chargé avec succès");
@@ -51,7 +53,11 @@ impl ShaderManager {
                 label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(source.into()),
             });
-        let id = self.shaders.insert(GpuShader { module, path: None });
+        let id = self.shaders.insert(GpuShader {
+            module,
+            path: None,
+            revision: 0,
+        });
         tracing::debug!(?id, label, "Shader WGSL inline enregistré");
         id
     }
@@ -87,6 +93,7 @@ impl ShaderManager {
             });
         if let Some(shader) = self.shaders.get_mut(id) {
             shader.module = module;
+            shader.revision += 1;
             tracing::info!(?id, path = %path, "Shader rechargé avec succès (Hot-reload)");
             Ok(())
         } else {
@@ -99,7 +106,9 @@ impl ShaderManager {
     }
 
     pub fn get_mut(&mut self, id: ShaderId) -> Option<&mut GpuShader> {
-        self.shaders.get_mut(id)
+        let shader = self.shaders.get_mut(id)?;
+        shader.revision += 1;
+        Some(shader)
     }
 
     pub fn remove(&mut self, id: ShaderId) -> Option<GpuShader> {

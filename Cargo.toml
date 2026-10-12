@@ -19,3 +19,7 @@ weave = { git = "https://github.com/Snowdeenn/weave.git", rev = "767c851" }
 [[example]]
 name = "demo"
 path = "src/examples/demo.rs"
+
+[[example]]
+name = "v2"
+path = "src/examples/v2.rs"

@@ -6,6 +6,7 @@ use crate::{FrameManager, pass::Pass};
 
 pub struct Renderer {
     pipelines: crate::PipelineManager,
+    graph_renderer: crate::GraphRenderer,
     world: crate::WorldPass,
     vfx: crate::VfxPass,
     hud: crate::HudPass,
@@ -28,8 +29,8 @@ impl Renderer {
         text_frag_id: ShaderId,
     ) -> crate::Result<Self> {
         let mut pipelines = crate::PipelineManager::new(ctx.surface_format());
-        let (intermediate_a, intermediate_view_a) = Self::create_intermediate(&ctx);
-        let (intermediate_b, intermediate_view_b) = Self::create_intermediate(&ctx);
+        let (intermediate_a, intermediate_view_a) = Self::create_intermediate(ctx);
+        let (intermediate_b, intermediate_view_b) = Self::create_intermediate(ctx);
 
         let world = crate::WorldPass::new(
             ctx,
@@ -38,15 +39,10 @@ impl Renderer {
             text_vert_id,
             text_frag_id,
         )?;
-        let vfx = crate::VfxPass::new(
-            &ctx,
-            gpu_resources,
-            &mut pipelines,
-            vert_shader,
-            frag_shader,
-        )?;
+        let vfx =
+            crate::VfxPass::new(ctx, gpu_resources, &mut pipelines, vert_shader, frag_shader)?;
         let hud = crate::HudPass::new(
-            &ctx,
+            ctx,
             gpu_resources,
             &mut pipelines,
             vert_shader,
@@ -57,6 +53,7 @@ impl Renderer {
         let frame_manager = crate::FrameManager::new();
         Ok(Self {
             pipelines,
+            graph_renderer: crate::GraphRenderer::new(&ctx.device, &ctx.queue),
             world,
             vfx,
             hud,
@@ -76,11 +73,39 @@ impl Renderer {
         gpu_resources: &mut crate::GpuResources,
         mut frame: crate::Frame,
     ) -> Option<crate::FrameContext> {
+        if !ctx.is_ready() {
+            return None;
+        }
+        if self.intermediate_a.width() != ctx.size.width
+            || self.intermediate_a.height() != ctx.size.height
+        {
+            let (a, av) = Self::create_intermediate(ctx);
+            let (b, bv) = Self::create_intermediate(ctx);
+            self.intermediate_a = a;
+            self.intermediate_view_a = av;
+            self.intermediate_b = b;
+            self.intermediate_view_b = bv;
+        }
+        let refreshed = (|| -> Result<(), crate::PassError> {
+            self.world
+                .refresh_pipeline(ctx, &mut self.pipelines, gpu_resources)?;
+            self.vfx
+                .refresh_pipeline(ctx, &mut self.pipelines, gpu_resources)?;
+            self.hud
+                .refresh_pipeline(ctx, &mut self.pipelines, gpu_resources)?;
+            for pass in self.post_process_passes.iter_mut().filter(|p| p.enabled) {
+                pass.refresh_pipeline(ctx, gpu_resources)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = refreshed {
+            tracing::error!(%error, "Cannot prepare renderer pipelines");
+            return None;
+        }
         let surface_texture = match ctx.current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                tracing::warn!("Surface GPU suboptimale, reconfiguration au prochain cycle");
-                ctx.reconfigure();
+                tracing::warn!("Surface GPU suboptimale");
                 t
             }
             wgpu::CurrentSurfaceTexture::Occluded => {
@@ -109,10 +134,41 @@ impl Renderer {
         self.current_source = DoubleBufferIndex::Primary;
         let mut encoder = ctx.create_encoder("frame");
 
-        let (_source, target) = match self.current_source {
-            DoubleBufferIndex::Primary => (&self.intermediate_view_a, &self.intermediate_view_b),
-            DoubleBufferIndex::Secondary => (&self.intermediate_view_b, &self.intermediate_view_a),
-        };
+        let screen_w = ctx.size.width;
+        let screen_h = ctx.size.height;
+        self.prepare_legacy(ctx, gpu_resources, &mut frame);
+
+        if let Err(error) = encode_legacy_graph(
+            ctx,
+            gpu_resources,
+            &mut encoder,
+            &surface_texture.texture,
+            &surface_view,
+            [&self.intermediate_a, &self.intermediate_b],
+            [&self.intermediate_view_a, &self.intermediate_view_b],
+            &mut self.world,
+            &mut self.vfx,
+            &mut self.hud,
+            &mut self.post_process_passes,
+        ) {
+            tracing::error!(%error, "Cannot compile/encode frame graph");
+            return None;
+        }
+
+        Some(crate::FrameContext {
+            encoder,
+            surface_view,
+            surface_texture,
+            size: (screen_w, screen_h),
+        })
+    }
+
+    fn prepare_legacy(
+        &mut self,
+        ctx: &crate::GpuContext,
+        gpu_resources: &mut crate::GpuResources,
+        frame: &mut crate::Frame,
+    ) {
         let screen_w = ctx.size.width;
         let screen_h = ctx.size.height;
         let cam_matrix = build_camera_matrix(
@@ -123,7 +179,7 @@ impl Renderer {
         );
 
         self.world.prepare(
-            &ctx,
+            ctx,
             gpu_resources,
             &mut crate::WorldInput {
                 commands: &mut frame.world,
@@ -131,7 +187,7 @@ impl Renderer {
             },
         );
         self.vfx.prepare(
-            &ctx,
+            ctx,
             gpu_resources,
             &mut crate::VfxInput {
                 commands: &frame.vfx,
@@ -144,55 +200,74 @@ impl Renderer {
         // left = 0.0, right = w, bottom = h, top = 0.0, near = -1.0, far = 1.0
         let hud_camera = utils::math::Mat4::orthographic_wgpu(0.0, w, h, 0.0, -1.0, 1.0);
         self.hud.prepare(
-            &ctx,
+            ctx,
             gpu_resources,
             &mut crate::HudInput {
                 commands: &mut frame.hud,
                 camera: hud_camera,
             },
         );
+    }
 
-        self.world.execute(&mut encoder, target, gpu_resources);
-        self.vfx.execute(&mut encoder, target, gpu_resources);
-
-        let last = self.post_process_passes.len().saturating_sub(1);
-        for i in 0..self.post_process_passes.len() {
-            self.current_source = self.current_source.swap();
-            let (src, tgt) = match self.current_source {
-                DoubleBufferIndex::Primary => {
-                    (&self.intermediate_view_a, &self.intermediate_view_b)
-                }
-                DoubleBufferIndex::Secondary => {
-                    (&self.intermediate_view_b, &self.intermediate_view_a)
-                }
-            };
-            let render_target = if i == last { &surface_view } else { tgt };
-            self.post_process_passes[i].prepare(
-                &ctx,
-                gpu_resources,
-                &mut crate::PostProcessInput {
-                    source: src,
-                    target: tgt,
-                },
-            );
-            self.post_process_passes[i].execute(&mut encoder, render_target, gpu_resources);
+    /// Encode the compatibility API into an offscreen texture using the same graph.
+    pub fn render_offscreen(
+        &mut self,
+        ctx: &crate::GpuContext,
+        resources: &mut crate::GpuResources,
+        mut frame: crate::Frame,
+        target: &wgpu::Texture,
+    ) -> crate::RenderResult<wgpu::CommandBuffer> {
+        if target.width() != ctx.size.width
+            || target.height() != ctx.size.height
+            || target.format() != ctx.surface_format()
+        {
+            return Err(crate::RenderError::new(
+                "offscreen",
+                "target differs from context size/format",
+            ));
         }
-        self.hud.execute(&mut encoder, &surface_view, gpu_resources);
-
-        Some(crate::FrameContext {
-            encoder,
-            surface_view,
-            surface_texture,
-            size: (screen_w, screen_h),
-        })
+        if self.intermediate_a.size() != target.size() {
+            (self.intermediate_a, self.intermediate_view_a) = Self::create_intermediate(ctx);
+            (self.intermediate_b, self.intermediate_view_b) = Self::create_intermediate(ctx);
+        }
+        self.world
+            .refresh_pipeline(ctx, &mut self.pipelines, resources)
+            .map_err(|e| crate::RenderError::new("world", e.to_string()))?;
+        self.vfx
+            .refresh_pipeline(ctx, &mut self.pipelines, resources)
+            .map_err(|e| crate::RenderError::new("vfx", e.to_string()))?;
+        self.hud
+            .refresh_pipeline(ctx, &mut self.pipelines, resources)
+            .map_err(|e| crate::RenderError::new("hud", e.to_string()))?;
+        for pass in self.post_process_passes.iter_mut().filter(|p| p.enabled) {
+            pass.refresh_pipeline(ctx, resources)
+                .map_err(|e| crate::RenderError::new("post process", e.to_string()))?;
+        }
+        self.prepare_legacy(ctx, resources, &mut frame);
+        let mut encoder = ctx.create_encoder("legacy offscreen");
+        let view = target.create_view(&Default::default());
+        encode_legacy_graph(
+            ctx,
+            resources,
+            &mut encoder,
+            target,
+            &view,
+            [&self.intermediate_a, &self.intermediate_b],
+            [&self.intermediate_view_a, &self.intermediate_view_b],
+            &mut self.world,
+            &mut self.vfx,
+            &mut self.hud,
+            &mut self.post_process_passes,
+        )?;
+        Ok(encoder.finish())
     }
 
     fn create_intermediate(ctx: &crate::GpuContext) -> (wgpu::Texture, wgpu::TextureView) {
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Intermediate Target"),
             size: wgpu::Extent3d {
-                width: ctx.size.width,
-                height: ctx.size.height,
+                width: ctx.size.width.max(1),
+                height: ctx.size.height.max(1),
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -208,6 +283,9 @@ impl Renderer {
 
     pub fn resize(&mut self, ctx: &mut crate::GpuContext, width: u32, height: u32) {
         ctx.resize(width, height);
+        if width == 0 || height == 0 {
+            return;
+        }
         let (intermediate_a, intermediate_view_a) = Self::create_intermediate(ctx);
         let (intermediate_b, intermediate_view_b) = Self::create_intermediate(ctx);
         self.intermediate_a = intermediate_a;
@@ -317,16 +395,21 @@ impl Renderer {
         id: usize,
         data: Data,
     ) {
-        let pass = &self.post_process_passes[id];
-        pass.write_scratch_buffer(ctx, data);
+        if let Some(pass) = self.post_process_passes.get(id) {
+            pass.write_scratch_buffer(ctx, data);
+        }
     }
 
     pub fn enable_post_process_pass(&mut self, id: crate::PostProcessPassId) {
-        self.post_process_passes[*id].enabled = true;
+        if let Some(pass) = self.post_process_passes.get_mut(*id) {
+            pass.enabled = true;
+        }
     }
 
     pub fn disable_post_process_pass(&mut self, id: crate::PostProcessPassId) {
-        self.post_process_passes[*id].enabled = false;
+        if let Some(pass) = self.post_process_passes.get_mut(*id) {
+            pass.enabled = false;
+        }
     }
 
     pub fn create_pipeline(
@@ -336,6 +419,21 @@ impl Renderer {
         key: crate::PipelineKey,
     ) -> Result<Arc<wgpu::RenderPipeline>, crate::PassError> {
         Ok(self.pipelines.get_or_create(ctx, gpu_resources, key)?)
+    }
+
+    /// Access the extensible renderer to register effects and configure HDR/depth.
+    pub fn graph_renderer(&mut self) -> &mut crate::GraphRenderer {
+        &mut self.graph_renderer
+    }
+
+    /// V2 frames use client-provided view bindings and generic objects.
+    pub fn render_v2(
+        &mut self,
+        ctx: &mut crate::GpuContext,
+        resources: &mut crate::resource::ResourceManager,
+        frame: crate::FrameV2,
+    ) -> crate::RenderResult<Option<crate::render::FrameReport>> {
+        self.graph_renderer.render(ctx, resources, frame)
     }
 
     pub fn frame_manager(&self) -> &FrameManager {
@@ -371,4 +469,143 @@ fn build_camera_matrix(
         0.0,
     );
     proj.multiply(view)
+}
+
+// Compatibility passes use the same versioned scheduler. The scheduler dispatches
+// registered callbacks; pass names have no special meaning to the graph compiler.
+#[allow(clippy::too_many_arguments)]
+fn encode_legacy_graph(
+    ctx: &crate::GpuContext,
+    resources: &mut crate::GpuResources,
+    encoder: &mut wgpu::CommandEncoder,
+    surface: &wgpu::Texture,
+    surface_view: &wgpu::TextureView,
+    textures: [&wgpu::Texture; 2],
+    views: [&wgpu::TextureView; 2],
+    world: &mut crate::WorldPass,
+    vfx: &mut crate::VfxPass,
+    hud: &mut crate::HudPass,
+    post: &mut [crate::PostProcessPass],
+) -> crate::RenderResult<()> {
+    use crate::graph::*;
+    type Encode<'a> = Box<
+        dyn FnMut(
+                &mut wgpu::CommandEncoder,
+                &PassResources<'_>,
+                &mut crate::GpuResources,
+            ) -> crate::RenderResult<()>
+            + 'a,
+    >;
+    let mut graph = RenderGraph::new();
+    let mut imports = GraphImports::default();
+    let mut import = |name: &str, texture: &wgpu::Texture, view: &wgpu::TextureView| {
+        let desc = TextureDesc {
+            size: texture.size(),
+            format: texture.format(),
+            usage: texture.usage(),
+            sample_count: texture.sample_count(),
+            mip_level_count: texture.mip_level_count(),
+            dimension: texture.dimension(),
+        };
+        let id = graph.import_texture(name, desc, false);
+        imports.insert(
+            id,
+            GraphResource::Texture {
+                texture: texture.clone(),
+                view: view.clone(),
+            },
+        );
+        id
+    };
+    let surface_id = import("surface", surface, surface_view);
+    let mut targets = [
+        import("intermediate A", textures[0], views[0]),
+        import("intermediate B", textures[1], views[1]),
+    ];
+    let active: Vec<_> = post.iter_mut().filter(|p| p.enabled).collect();
+    let count = active.len();
+    let mut scene = if count == 0 { surface_id } else { targets[0] };
+    let mut nodes: Vec<(PassId, Encode<'_>)> = Vec::new();
+    let world_target = scene;
+    let id = graph.add_pass(PassDescriptor::new("world").access(scene, AccessKind::ColorClear));
+    nodes.push((
+        id,
+        Box::new(move |encoder, graph, resources| {
+            world.execute(encoder, graph.view(world_target)?, resources);
+            Ok(())
+        }),
+    ));
+    scene = graph.next_version(scene)?;
+    let vfx_target = scene;
+    let id =
+        graph.add_pass(PassDescriptor::new("transparent").access(scene, AccessKind::ColorLoad));
+    nodes.push((
+        id,
+        Box::new(move |encoder, graph, resources| {
+            vfx.execute(encoder, graph.view(vfx_target)?, resources);
+            Ok(())
+        }),
+    ));
+    if count > 0 {
+        targets[0] = scene;
+    }
+    for (i, pass) in active.into_iter().enumerate() {
+        let source = scene;
+        let target = if i + 1 == count {
+            surface_id
+        } else {
+            let slot = (i + 1) % 2;
+            if slot == 0 || i > 0 {
+                targets[slot] = graph.next_version(targets[slot])?;
+            }
+            targets[slot]
+        };
+        let id = graph.add_pass(
+            PassDescriptor::new(format!("post process {i}"))
+                .access(source, AccessKind::Sampled)
+                .access(target, AccessKind::ColorClear),
+        );
+        nodes.push((
+            id,
+            Box::new(move |encoder, graph, resources| {
+                let source_view = graph.view(source)?;
+                let target_view = graph.view(target)?;
+                pass.prepare(
+                    ctx,
+                    resources,
+                    &mut crate::PostProcessInput {
+                        source: source_view,
+                        target: target_view,
+                    },
+                );
+                pass.execute(encoder, target_view, resources);
+                Ok(())
+            }),
+        ));
+        scene = target;
+    }
+    let output = graph.next_version(scene)?;
+    let id = graph.add_pass(PassDescriptor::new("overlay").access(output, AccessKind::ColorLoad));
+    nodes.push((
+        id,
+        Box::new(move |encoder, graph, resources| {
+            hud.execute(encoder, graph.view(output)?, resources);
+            Ok(())
+        }),
+    ));
+    graph.export(output);
+    let compiled = graph.compile()?;
+    let allocations = compiled.prepare(&ctx.device, imports)?;
+    for id in &compiled.order {
+        let (_, node) = nodes
+            .iter_mut()
+            .find(|(key, _)| key == id)
+            .ok_or_else(|| crate::RenderError::new("legacy graph", "missing pass"))?;
+        node(
+            encoder,
+            &compiled.pass_resources(*id, &allocations)?,
+            resources,
+        )?;
+    }
+    Ok(())
 }

@@ -1,20 +1,30 @@
 extern crate self as utils;
 
+/// V2 integration guide (expanded in the documentation commit).
+pub mod guide {}
+
 pub mod arena;
 mod context;
 pub mod draw;
 mod errors;
-mod frame;
+pub mod frame;
 mod geometry;
 pub mod ids;
 pub mod math {
     pub use ::math::*;
 }
+pub mod bindings;
+pub mod graph;
+pub mod material;
 mod pass;
-mod renderer;
-mod resource;
-mod bindings;
-mod pipeline;
+pub mod pipeline;
+pub mod render;
+pub mod render_object;
+pub mod renderer;
+pub mod resource;
+
+pub use frame::v2::Frame as FrameV2;
+pub use render::GraphRenderer;
 
 pub use context::GpuContext;
 pub use draw::{

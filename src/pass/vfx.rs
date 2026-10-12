@@ -67,7 +67,7 @@ impl VfxPass {
             fragment_shader: frag_shader,
             blend_mode: BlendMode::Additive,
             vertex_format: VertexFormat::Pos2UvColor,
-            bind_groups: &crate::CAM_BIND_GROUP,
+            bind_groups: crate::CAM_BIND_GROUP,
         };
 
         let pipeline = pipelines.get_or_create(ctx, gpu_resource, pipeline_key.clone())?;
@@ -102,6 +102,21 @@ impl VfxPass {
         })
     }
 
+    pub(crate) fn refresh_pipeline(
+        &mut self,
+        ctx: &GpuContext,
+        pipelines: &mut PipelineManager,
+        resources: &GpuResources,
+    ) -> Result<(), PassError> {
+        self.set_shader(
+            ctx,
+            pipelines,
+            resources,
+            self.vert_shader,
+            self.frag_shader,
+        )
+    }
+
     pub fn set_shader(
         &mut self,
         ctx: &GpuContext,
@@ -118,7 +133,7 @@ impl VfxPass {
                 fragment_shader: frag_shader,
                 blend_mode: BlendMode::Additive,
                 vertex_format: VertexFormat::Pos2UvColor,
-                bind_groups: &crate::CAM_BIND_GROUP,
+                bind_groups: crate::CAM_BIND_GROUP,
             },
         )?;
 

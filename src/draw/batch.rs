@@ -17,7 +17,7 @@ impl DrawCommandBuffer {
     }
 
     pub fn sort_commands(&mut self) {
-        self.commands.sort_unstable_by_key(|cmd| sort_key(cmd));
+        self.commands.sort_by_key(sort_key);
     }
 
     pub fn clear(&mut self) {
@@ -32,28 +32,13 @@ impl DrawCommandBuffer {
     }
 }
 
-fn sort_key(cmd: &DrawCommand) -> u64 {
+fn sort_key(cmd: &DrawCommand) -> u8 {
     match cmd {
-        DrawCommand::Shape { layer, blend, .. } => (*layer as u64) << 56 | (*blend as u64) << 48,
-        DrawCommand::Mesh { layer, blend, .. } => (*layer as u64) << 56 | (*blend as u64) << 48,
-        DrawCommand::Texture {
-            layer, blend, id, ..
-        } => (*layer as u64) << 56 | (*blend as u64) << 48 | (id.index as u64),
-        DrawCommand::Text { layer, .. } => (*layer as u64) << 56 | (1u64 << 32),
-        DrawCommand::Material {
-            layer,
-            material_id,
-            texture_id,
-            blend,
-            ..
-        } => {
-            (*layer as u64) << 56
-                | (*blend as u64) << 48
-                | (material_id.index as u64) << 16
-                | texture_id.map(|t| t.index as u64).unwrap_or(0)
-        }
-        DrawCommand::NinePatch {
-            layer, blend, id, ..
-        } => (*layer as u64) << 56 | (*blend as u64) << 48 | (id.index as u64),
+        DrawCommand::Shape { layer, .. }
+        | DrawCommand::Mesh { layer, .. }
+        | DrawCommand::Texture { layer, .. }
+        | DrawCommand::Text { layer, .. }
+        | DrawCommand::Material { layer, .. }
+        | DrawCommand::NinePatch { layer, .. } => *layer,
     }
 }

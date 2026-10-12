@@ -1,16 +1,9 @@
-//! Le [`GpuContext`] est le pont logique entre la code base et le GPU.
+//! GPU ownership and optional window presentation for both Prism APIs.
 //!
-//! Il encapsule les 3 objets fondamentaux de wgpu:
-//! - [`wgpu::Device`] c'est le GPU logique. Il crée toutes les ressources — textures,
-//! buffers, pipelines, shaders. Tu ne parles jamais au GPU directement,
-//! tout passes toujours par device.
-//!
-//! - [`wgpu::Device`] c'est la file d'envoi des commandes. Quand tu as fini d'enregistrer
-//! ce que tu veux dessiner, tu envoies tout d'un coup via queue.submit().
-//! Le GPU exécute dans l'ordre.
-//!
-//! - [`wgpu::Surface`] c'est la fenêtre côté GPU. Elle expose les textures du swapchain —
-//! les images à renders avant de les afficher à l'écran.
+//! The context retains the device, queue, surface, configuration and window size.
+//! Construct V2 services with [`crate::resource::ResourceManager::from_context`]
+//! and [`crate::GraphRenderer::from_context`], then present with
+//! [`crate::GraphRenderer::render`] without handling the device or queue directly.
 
 use wgpu::TextureUsages;
 use winit::dpi::PhysicalSize;
@@ -18,11 +11,13 @@ use winit::dpi::PhysicalSize;
 use crate::errors::{self};
 use std::sync::Arc;
 
+/// Owns GPU access and optional surface presentation state.
+/// Raw device/queue fields remain available for advanced integration and compatibility.
 pub struct GpuContext {
-    _window: Arc<winit::window::Window>,
+    _window: Option<Arc<winit::window::Window>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     surface_config: wgpu::SurfaceConfiguration,
     pub size: PhysicalSize<u32>,
     is_surface_configured: bool,
@@ -47,9 +42,7 @@ impl GpuContext {
             backend_options: Default::default(),
             display: None,
         });
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("[GpuContext] Echec lors de la créations de la surface");
+        let surface = instance.create_surface(window.clone())?;
         let adapter = {
             let _adapter_span = tracing::info_span!("request_adapter").entered();
             match instance
@@ -156,13 +149,45 @@ impl GpuContext {
         }
 
         Ok(Self {
-            _window: window,
+            _window: Some(window),
             device,
             queue,
-            surface,
+            surface: Some(surface),
             surface_config,
             size,
             is_surface_configured,
+        })
+    }
+
+    /// Headless context for compatibility passes, tooling and offscreen tests.
+    pub fn from_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self, errors::GpuContextError> {
+        if width == 0 || height == 0 {
+            return Err(errors::GpuContextError::InvalidWindowSize { width, height });
+        }
+        Ok(Self {
+            _window: None,
+            device,
+            queue,
+            surface: None,
+            surface_config: wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width,
+                height,
+                present_mode: wgpu::PresentMode::Fifo,
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                view_formats: Vec::new(),
+                desired_maximum_frame_latency: 2,
+                color_space: wgpu::SurfaceColorSpace::Auto,
+            },
+            size: PhysicalSize::new(width, height),
+            is_surface_configured: false,
         })
     }
 
@@ -173,23 +198,29 @@ impl GpuContext {
             self.surface_config.height = height;
             self.size.width = width;
             self.size.height = height;
-            self.surface.configure(&self.device, &self.surface_config);
+            if let Some(surface) = &self.surface {
+                surface.configure(&self.device, &self.surface_config);
+            }
             self.is_surface_configured = true;
         } else {
-            tracing::warn!(
-                width,
-                height,
-                "Ignoré : tentative de redimensionnement à 0 (fenêtre minimisée ?)"
-            );
+            self.size = PhysicalSize::new(width, height);
+            self.is_surface_configured = false;
         }
     }
 
     pub fn current_texture(&self) -> wgpu::CurrentSurfaceTexture {
-        self.surface.get_current_texture()
+        self.surface.as_ref().map_or(
+            wgpu::CurrentSurfaceTexture::Validation,
+            wgpu::Surface::get_current_texture,
+        )
     }
 
     pub fn reconfigure(&self) {
-        self.surface.configure(&self.device, &self.surface_config);
+        if self.is_ready()
+            && let Some(surface) = &self.surface
+        {
+            surface.configure(&self.device, &self.surface_config);
+        }
     }
 
     pub fn create_encoder(&self, label: &str) -> wgpu::CommandEncoder {
@@ -208,7 +239,8 @@ impl GpuContext {
     }
 
     pub fn is_ready(&self) -> bool {
-        self.is_surface_configured
+        self.surface.is_some()
+            && self.is_surface_configured
             && self.surface_config.width > 0
             && self.surface_config.height > 0
     }

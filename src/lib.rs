@@ -1,6 +1,15 @@
+//! Rendering with owned frame submissions, explicit material schemas and a versioned graph.
+//!
+//! Start with the [V2 integration guide](guide) for architecture, examples and contracts.
+//! The main V2 entry points are [`GraphRenderer`], [`FrameV2`] and
+//! [`resource::ResourceManager`]. Historical root reexports such as [`Frame`],
+//! [`Material`] and [`PipelineKey`] remain legacy types; use [`material::Material`]
+//! and [`pipeline::PipelineKey`] for V2.
+
 extern crate self as utils;
 
-/// V2 integration guide (expanded in the documentation commit).
+/// Complete V2 architecture, API usage, lifecycle and migration documentation.
+#[doc = include_str!("../docs/V2_GUIDE.md")]
 pub mod guide {}
 
 pub mod arena;

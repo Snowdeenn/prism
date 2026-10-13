@@ -1,72 +1,37 @@
-//! Rendering with owned frame submissions, explicit material schemas and a versioned graph.
+//! Prism rendering APIs.
 //!
-//! Start with the [V2 integration guide](guide) for architecture, examples and contracts.
-//! The main V2 entry points are [`GraphRenderer`], [`FrameV2`] and
-//! [`resource::ResourceManager`]. Historical root reexports such as [`Frame`],
-//! [`Material`] and [`PipelineKey`] remain legacy types; use [`material::Material`]
-//! and [`pipeline::PipelineKey`] for V2.
+//! Use [`v1`] for historical drawing commands and [`v2`] for owned frame
+//! submissions and the versioned render graph. The implementations live in the
+//! `prism-v1` and `prism-v2` workspace crates, which can also be used directly.
+//! Existing root imports remain available for compatibility.
 
-extern crate self as utils;
+pub use prism_v1 as v1;
+pub use prism_v2 as v2;
 
-/// Complete V2 architecture, API usage, lifecycle and migration documentation.
-#[doc = include_str!("../docs/V2_GUIDE.md")]
-pub mod guide {}
+pub use prism_v1::{
+    BindGroupLayoutEntryKey, BindingTypeKey, BlendMode, BufferError, CAM_BIND_GROUP, Color,
+    DoubleBufferIndex, DrawCommand, DrawCommandBuffer, Frame, FrameContext, FrameManager,
+    GpuBuffer, GpuBufferManager, GpuResources, GpuShader, GpuTexture, HudInput, HudPass,
+    MATERIAL_BIND_GROUP, Material, MaterialManager, Pass, PassError, PipelineError, PipelineKey,
+    PipelineManager, PostProcessInput, PostProcessPass, PostProcessPassId, PrismError, Renderer,
+    Result, ShaderError, ShaderManager, TEXTURE_BIND_GROUP, TextRenderer, TextRendererError,
+    TextureError, TextureManager, VertexFormat, VfxInput, VfxPass, WorldInput, WorldPass, draw,
+    renderer,
+};
+pub use prism_v2::{
+    FrameV2, GpuContext, GpuContextError, GraphRenderer, NinePatchMargins, RawMesh, RenderError,
+    RenderResult, Shape, Tesselator, UvRect, Vertex, arena, bindings, graph, guide, ids, material,
+    math, pipeline, render, render_object,
+};
 
-pub mod arena;
-mod context;
-pub mod draw;
-mod errors;
-pub mod frame;
-mod geometry;
-pub mod ids;
-pub mod math {
-    pub use ::math::*;
+/// Historical frame services and the V2 frame submission module.
+pub mod frame {
+    pub use prism_v1::frame::*;
+    pub use prism_v2::frame::v2;
 }
-pub mod bindings;
-pub mod graph;
-pub mod material;
-mod pass;
-pub mod pipeline;
-pub mod render;
-pub mod render_object;
-pub mod renderer;
-pub mod resource;
 
-pub use frame::v2::Frame as FrameV2;
-pub use render::GraphRenderer;
-
-pub use context::GpuContext;
-pub use draw::{
-    batch::DrawCommandBuffer, colors::Color, commands::DrawCommand, text::TextRenderer,
-};
-pub use errors::*;
-pub use errors::{GpuContextError, TextRendererError};
-pub use frame::{frame::Frame, frame::FrameContext, manager::FrameManager};
-pub use geometry::{
-    mesh::{RawMesh, Vertex},
-    shape::{NinePatchMargins, Shape, UvRect},
-    tesselator::Tesselator,
-};
-pub use pass::{
-    HudInput, Pass, PostProcessInput, VfxInput, WorldInput,
-    hud::HudPass,
-    post_process::{PostProcessPass, PostProcessPassId},
-    vfx::VfxPass,
-    world::WorldPass,
-};
-pub use renderer::{DoubleBufferIndex, Renderer};
-pub use resource::{
-    GpuResources,
-    buffer::{GpuBuffer, GpuBufferManager},
-    material::{Material, MaterialManager},
-    pipeline::{
-        BindGroupLayoutEntryKey, BindingTypeKey, BlendMode, PipelineKey, PipelineManager,
-        VertexFormat,
-    },
-    shader::{GpuShader, ShaderManager},
-    texture::{GpuTexture, TextureManager},
-};
-
-pub use pass::CAM_BIND_GROUP;
-pub use pass::MATERIAL_BIND_GROUP;
-pub use pass::TEXTURE_BIND_GROUP;
+/// Historical GPU resources and the V2 resource manager.
+pub mod resource {
+    pub use prism_v1::resource::*;
+    pub use prism_v2::resource::{ResourceManager, manager};
+}

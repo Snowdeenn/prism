@@ -3,7 +3,7 @@
 This guide documents the implemented V2 API, built on Rust 2024 and wgpu 30.
 It distinguishes supported behavior from extension points and future optimizations.
 The public Rust modules provide the exact signatures; the examples below are checked
-by `cargo test --doc` through the `prism::guide` module.
+by `cargo test --workspace --doc` through the `prism_v2::guide` module.
 
 ## Contents
 
@@ -69,8 +69,8 @@ it and let the renderer acquire and present frames through it:
 
 ```no_run
 use std::sync::Arc;
-use prism::{GpuContext, GraphRenderer, FrameV2};
-use prism::resource::ResourceManager;
+use prism_v2::{GpuContext, GraphRenderer, FrameV2};
+use prism_v2::resource::ResourceManager;
 
 async fn initialize_and_render(window: Arc<winit::window::Window>)
     -> Result<(), Box<dyn std::error::Error>>
@@ -105,10 +105,10 @@ This complete headless example renders an orange procedural triangle. `no_run`
 means the documentation checks compilation without requiring a GPU in CI.
 
 ```no_run
-use prism::{FrameV2, GraphRenderer};
-use prism::material::{Material, MaterialTemplate};
-use prism::render_object::{RenderObject, RenderPhaseId, SortKey};
-use prism::resource::{ResourceManager, manager::Geometry};
+use prism_v2::{FrameV2, GraphRenderer};
+use prism_v2::material::{Material, MaterialTemplate};
+use prism_v2::render_object::{RenderObject, RenderPhaseId, SortKey};
+use prism_v2::resource::{ResourceManager, manager::Geometry};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instance = wgpu::Instance::new(
@@ -179,7 +179,7 @@ primitives, one color target, no blending, no depth, and one sample. The shader 
 produce a full-screen triangle or any other procedural three-vertex geometry.
 
 For indexed CPU tessellation, multiple schemas and PNG readback, see the repository's
-`src/examples/v2.rs`. Readback is an explicit wgpu operation; graph export is unrelated
+`crates/prism-v2/examples/v2.rs`. Readback is an explicit wgpu operation; graph export is unrelated
 to downloading pixels.
 
 ## Resource management and lifetime
@@ -243,7 +243,7 @@ minimum binding sizes and dynamic-offset flags; textures carry sample type,
 dimension and multisampling or storage access/format.
 
 ```rust
-use prism::bindings::{BindingSchema, GroupSchema, BindingEntryDesc, BindingKind};
+use prism_v2::bindings::{BindingSchema, GroupSchema, BindingEntryDesc, BindingKind};
 
 let schema = BindingSchema {
     groups: vec![GroupSchema {
@@ -261,7 +261,7 @@ let schema = BindingSchema {
 };
 let normalized = schema.normalized()?;
 assert_eq!(normalized.groups[0].index, 2); // No renumbering.
-# Ok::<(), prism::RenderError>(())
+# Ok::<(), prism_v2::RenderError>(())
 ```
 
 This schema corresponds to `@group(2) @binding(0) var<uniform> tint: vec4<f32>`.
@@ -316,7 +316,7 @@ structs, insert padding, or transpose matrices. Use a suitable `#[repr(C)]` / Po
 representation and account for WGSL alignment yourself.
 
 ```rust
-use prism::material::ParameterBlock;
+use prism_v2::material::ParameterBlock;
 let tint = ParameterBlock {
     group: 2,
     binding: 0,
@@ -360,9 +360,9 @@ count must match, and each must meet the device's uniform or storage offset alig
 The base range plus dynamic offset must remain inside the buffer.
 
 ```rust
-use prism::material::{BindingResource, BindingSet, BindingSetUse};
-use prism::resource::ResourceManager;
-use prism::ids::BufferId;
+use prism_v2::material::{BindingResource, BindingSet, BindingSetUse};
+use prism_v2::resource::ResourceManager;
+use prism_v2::ids::BufferId;
 
 fn select_uniform_record(
     resources: &mut ResourceManager,
@@ -456,8 +456,8 @@ is empty. The explicit graph path does not insert views or interpret effect requ
 An empty in-bounds request produces no copy.
 
 ```rust
-use prism::{FrameV2, ids::BufferId};
-use prism::frame::v2::UploadRequest;
+use prism_v2::{FrameV2, ids::BufferId};
+use prism_v2::frame::v2::UploadRequest;
 fn upload_vertices(frame: &mut FrameV2, target: BufferId, values: &[f32]) {
     frame.uploads.push(UploadRequest::Buffer {
         target, offset: 0,
@@ -477,8 +477,8 @@ full texture aspect. Prism does not pad rows, convert formats or generate mips.
 This example pads tightly packed RGBA8 rows for a single 2D layer:
 
 ```rust
-use prism::frame::v2::UploadRequest;
-use prism::ids::TextureId;
+use prism_v2::frame::v2::UploadRequest;
+use prism_v2::ids::TextureId;
 fn rgba8_upload(target: TextureId, width: u32, height: u32, rgba: &[u8]) -> UploadRequest {
     assert!(width > 0 && height > 0);
     let packed = width * 4;
@@ -507,8 +507,8 @@ resources. Later GPU reads still observe queue execution order, not isolated cop
 of every persistent asset.
 
 ```no_run
-# use prism::{FrameV2, GraphRenderer, RenderResult};
-# use prism::resource::ResourceManager;
+# use prism_v2::{FrameV2, GraphRenderer, RenderResult};
+# use prism_v2::resource::ResourceManager;
 fn deferred(
     renderer: &mut GraphRenderer,
     resources: &mut ResourceManager,
@@ -581,11 +581,11 @@ both visible to the fragment stage. `MaterialTemplate::fullscreen` does not add
 that schema automatically.
 
 ```no_run
-use prism::{FrameV2, GraphRenderer, RenderResult};
-use prism::resource::ResourceManager;
-use prism::material::MaterialTemplate;
-use prism::render::FullscreenEffect;
-use prism::frame::v2::PostProcessSubmission;
+use prism_v2::{FrameV2, GraphRenderer, RenderResult};
+use prism_v2::resource::ResourceManager;
+use prism_v2::material::MaterialTemplate;
+use prism_v2::render::FullscreenEffect;
+use prism_v2::frame::v2::PostProcessSubmission;
 
 fn add_invert(
     resources: &mut ResourceManager,
@@ -684,7 +684,7 @@ old contents. For a compute transform, prefer separate input/output resources;
 do not assume automatic in-place read/write hazard modeling.
 
 ```rust
-use prism::graph::{RenderGraph, TextureDesc, PassDescriptor, AccessKind};
+use prism_v2::graph::{RenderGraph, TextureDesc, PassDescriptor, AccessKind};
 let mut graph = RenderGraph::new();
 let first = graph.create_texture("scene", TextureDesc::color(
     64, 64, wgpu::TextureFormat::Rgba8Unorm,
@@ -697,7 +697,7 @@ let draw = graph.add_pass(PassDescriptor::new("draw")
 graph.export(composed);
 let compiled = graph.compile()?;
 assert_eq!(compiled.order, vec![clear, draw]);
-# Ok::<(), prism::RenderError>(())
+# Ok::<(), prism_v2::RenderError>(())
 ```
 
 ### Scheduling and culling
@@ -764,13 +764,13 @@ This custom copy pass demonstrates imports, transient output, export and executa
 registration without depending on the default frame composition:
 
 ```no_run
-use prism::{FrameV2, GraphRenderer, RenderResult};
-use prism::frame::v2::FrameGraph;
-use prism::graph::{
+use prism_v2::{FrameV2, GraphRenderer, RenderResult};
+use prism_v2::frame::v2::FrameGraph;
+use prism_v2::graph::{
     AccessKind, GraphResource, PassDescriptor, PassResources, ResourceVersion,
 };
-use prism::render::{GraphPass, PrepareContext};
-use prism::resource::ResourceManager;
+use prism_v2::render::{GraphPass, PrepareContext};
+use prism_v2::resource::ResourceManager;
 
 struct CopyBuffer {
     source: ResourceVersion,
@@ -917,16 +917,17 @@ Useful checks when output is wrong:
 
 ## Migration from the legacy API
 
-V2 coexists with historical types during adoption. Avoid accidentally importing the
-old root-level names:
+The implementations live in separate workspace crates: `prism-v1` and `prism-v2`.
+Use `prism_v1` for historical types and `prism_v2` for the new API. The root `prism`
+crate retains the original imports and exposes both APIs as `prism::v1` and `prism::v2`.
 
 | Legacy | V2 |
 | --- | --- |
-| `prism::Frame` | `prism::FrameV2` or `prism::frame::v2::Frame` |
-| `prism::Material` | `prism::material::Material` |
-| `prism::PipelineKey` | `prism::pipeline::PipelineKey` |
-| `prism::GpuResources` | `prism::resource::ResourceManager` |
-| `prism::Renderer` | `prism::GraphRenderer` for direct V2 use |
+| `prism_v1::Frame` | `prism_v2::FrameV2` or `prism_v2::frame::v2::Frame` |
+| `prism_v1::Material` | `prism_v2::material::Material` |
+| `prism_v1::PipelineKey` | `prism_v2::pipeline::PipelineKey` |
+| `prism_v1::GpuResources` | `prism_v2::resource::ResourceManager` |
+| `prism_v1::Renderer` | `prism_v2::GraphRenderer` for direct V2 use |
 
 A practical migration sequence is:
 
@@ -965,11 +966,11 @@ already cached and network access is unnecessary:
 
 ```sh
 cargo fmt --all -- --check
-cargo test --all-targets
+cargo test --workspace --all-targets
 cargo test --test render_gpu -- --ignored --nocapture
-cargo test --doc
-RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --no-deps
-cargo run --example v2 -- target/prism-v2-reference.png
+cargo test --workspace --doc
+RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps
+cargo run -p prism-v2 --example v2 -- target/prism-v2-reference.png
 ```
 
 CPU tests cover schema/key normalization, graph versions, ordering, cycles, usage

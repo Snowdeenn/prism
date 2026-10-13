@@ -1,25 +1,47 @@
 [package]
 name = "prism"
+version.workspace = true
+edition.workspace = true
+
+[workspace]
+members = ["crates/prism-v1", "crates/prism-v2"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
 wgpu = "30"
 winit = "0.30"
 pollster = "0.3"
 glyphon = "0.12"
 crossbeam = "0.8"
 image = "0.25"
-bytemuck = "1"
+bytemuck = { version = "1", features = ["derive"] }
 thiserror = "2.0.19"
 math = { git = "https://github.com/Snowdeenn/math.git" }
 tracing = "0.1"
 weave = { git = "https://github.com/Snowdeenn/weave.git", rev = "767c851" }
+prism-v1 = { path = "crates/prism-v1" }
+prism-v2 = { path = "crates/prism-v2" }
+
+[dependencies]
+prism-v1.workspace = true
+prism-v2.workspace = true
+
+[dev-dependencies]
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+image.workspace = true
+bytemuck.workspace = true
+math.workspace = true
 
 [[example]]
 name = "demo"
-path = "src/examples/demo.rs"
+path = "crates/prism-v1/examples/demo.rs"
 
 [[example]]
 name = "v2"
-path = "src/examples/v2.rs"
+path = "crates/prism-v2/examples/v2.rs"

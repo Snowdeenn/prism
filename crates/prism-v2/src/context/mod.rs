@@ -26,7 +26,7 @@ pub struct GpuContext {
 impl GpuContext {
     pub async fn new(
         window: Arc<winit::window::Window>,
-    ) -> errors::Result<Self, errors::GpuContextError> {
+    ) -> std::result::Result<Self, errors::GpuContextError> {
         let _span = tracing::info_span!("GpuContext::init").entered();
         let size = window.inner_size();
         tracing::debug!(

@@ -9,17 +9,40 @@ subsystem, executable examples, resource ownership, graph scheduling, diagnostic
 migration, and current limitations. The same guide is available as `prism::guide`
 in generated Rust documentation.
 
+## Workspace
+
+The two APIs are implemented in separate crates:
+
+- `crates/prism-v1` (`prism-v1` / `prism_v1`): historical drawing commands,
+  passes, text rendering and compatibility renderer.
+- `crates/prism-v2` (`prism-v2` / `prism_v2`): owned frames, resources,
+  materials, binding schemas, pipeline caches and render graph.
+
+The root `prism` crate reexports both as `prism::v1` and `prism::v2` and keeps
+the existing imports available. Each sub-crate can also be used as a direct
+dependency. V1 depends on V2 for its graph, caches and shared types (`GpuContext`,
+geometry and handles); V2 does not depend on V1 or its text rendering stack.
+
+```rust
+use prism::v1::Frame as LegacyFrame;
+use prism::v2::{Frame, GraphRenderer, Material, PipelineKey, ResourceManager};
+```
+
+For a French overview of the new types and their roles, read the
+[note sur les structures V2](docs/NOTE_STRUCTURES_V2_FR.md).
+
 ## Run and explore
 
 ```sh
-cargo run --example v2 -- target/prism-v2-reference.png
-cargo doc --no-deps --open
-cargo test --doc
+cargo run -p prism-v2 --example v2 -- target/prism-v2-reference.png
+cargo doc --workspace --no-deps --open
+cargo test --workspace --doc
 ```
 
-The [headless V2 example](src/examples/v2.rs) renders a tessellated scene with
+The [headless V2 example](crates/prism-v2/examples/v2.rs) renders a tessellated scene with
 multiple material schemas, transparency, and an overlay, then saves a PNG.
-The legacy windowed example is available with `cargo run --example demo`.
+The [legacy windowed example](crates/prism-v1/examples/demo.rs) is available with
+`cargo run -p prism-v1 --example demo`. The root example commands remain available.
 A compatible GPU adapter or software backend is needed to run rendering examples.
 
 ## V2 API map
@@ -62,10 +85,10 @@ See the guide's migration section before mixing both APIs.
 
 ```sh
 cargo fmt --all -- --check
-cargo test --all-targets
+cargo test --workspace --all-targets
 cargo test --test render_gpu -- --ignored --nocapture
-cargo test --doc
-RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --no-deps
+cargo test --workspace --doc
+RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps
 ```
 
 GPU tests are opt-in for environments without an adapter. They exercise pixels,

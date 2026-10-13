@@ -430,9 +430,9 @@ impl Renderer {
     pub fn render_v2(
         &mut self,
         ctx: &mut crate::GpuContext,
-        resources: &mut crate::resource::ResourceManager,
+        resources: &mut prism_v2::resource::ResourceManager,
         frame: crate::FrameV2,
-    ) -> crate::RenderResult<Option<crate::render::FrameReport>> {
+    ) -> crate::RenderResult<Option<prism_v2::render::FrameReport>> {
         self.graph_renderer.render(ctx, resources, frame)
     }
 
@@ -487,7 +487,7 @@ fn encode_legacy_graph(
     hud: &mut crate::HudPass,
     post: &mut [crate::PostProcessPass],
 ) -> crate::RenderResult<()> {
-    use crate::graph::*;
+    use prism_v2::graph::*;
     type Encode<'a> = Box<
         dyn FnMut(
                 &mut wgpu::CommandEncoder,

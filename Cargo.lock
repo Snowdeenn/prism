@@ -1955,8 +1955,37 @@ name = "prism"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "image",
+ "math",
+ "pollster",
+ "prism-v1",
+ "prism-v2",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "prism-v1"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
  "crossbeam",
  "glyphon",
+ "image",
+ "math",
+ "pollster",
+ "prism-v2",
+ "thiserror 2.0.20",
+ "tracing",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "prism-v2"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
  "image",
  "math",
  "pollster",

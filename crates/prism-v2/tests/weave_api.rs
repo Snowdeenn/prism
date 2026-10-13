@@ -1,4 +1,4 @@
-use prism::{RawMesh, Shape, Tesselator};
+use prism_v2::{RawMesh, Shape, Tesselator};
 use weave::iter::{IntoParallelIterator, ParallelIterator, ParallelSlice};
 use weave::{Priority, ThreadPoolBuilder, WorkerLocal};
 

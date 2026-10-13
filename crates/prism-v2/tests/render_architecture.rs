@@ -1,4 +1,4 @@
-use prism::{arena::Arena, bindings::*, graph::*, ids::ShaderTag, pipeline::*};
+use prism_v2::{arena::Arena, bindings::*, graph::*, ids::ShaderTag, pipeline::*};
 
 fn color() -> TextureDesc {
     TextureDesc::color(16, 16, wgpu::TextureFormat::Rgba8Unorm)

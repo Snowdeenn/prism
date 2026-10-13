@@ -1,5 +1,5 @@
-//! Headless reference scene: cargo run --example v2 -- target/prism-v2-reference.png
-use prism::{
+//! Headless reference scene: cargo run -p prism-v2 --example v2 -- target/prism-v2-reference.png
+use prism_v2::{
     bindings::*,
     frame::v2::UploadRequest,
     material::*,

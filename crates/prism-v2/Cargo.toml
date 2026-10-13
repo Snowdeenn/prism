@@ -1,0 +1,17 @@
+[package]
+name = "prism-v2"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+bytemuck.workspace = true
+thiserror.workspace = true
+math.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+weave.workspace = true

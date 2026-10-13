@@ -13,10 +13,10 @@
 //   • Un quad slanted violet sur le HUD         (HudPass)
 //   • Du texte blanc "PRISM DEMO" en haut       (HudPass, TextRenderer)
 //
-// Lancer avec :  cargo run -p prism --example demo
+// Lancer avec :  cargo run -p prism-v1 --example demo
 
-use prism::Pass;
-use std::sync::Arc; // Ou use prism::passes::RenderPass; selon ton nom de trait
+use prism_v1::Pass;
+use std::sync::Arc; // Ou use prism_v1::passes::RenderPass; selon ton nom de trait
 
 use winit::{
     application::ApplicationHandler,
@@ -50,31 +50,31 @@ fn size_to_clip(sw: f32, sh: f32, w: f32, h: f32) -> [f32; 2] {
 
 struct Demo {
     // GPU
-    ctx: prism::GpuContext,
-    pipelines: prism::PipelineManager,
-    resources: prism::GpuResources,
+    ctx: prism_v1::GpuContext,
+    pipelines: prism_v1::PipelineManager,
+    resources: prism_v1::GpuResources,
 
     // Passes
-    world: prism::WorldPass,
-    vfx: prism::VfxPass,
-    hud: prism::HudPass,
+    world: prism_v1::WorldPass,
+    vfx: prism_v1::VfxPass,
+    hud: prism_v1::HudPass,
 
     // Fenêtre
     window: Arc<Window>,
 }
 
 impl Demo {
-    async fn new(window: Arc<Window>) -> prism::Result<Self> {
+    async fn new(window: Arc<Window>) -> prism_v1::Result<Self> {
         let size = window.inner_size();
 
         // ── GpuContext ───────────────────────────────────────────────────────
-        let mut ctx = prism::GpuContext::new(window.clone())
+        let mut ctx = prism_v1::GpuContext::new(window.clone())
             .await
             .expect("Impossible de créer le GpuContext");
         ctx.resize(size.width, size.height);
 
         // ── Ressources ───────────────────────────────────────────────────────
-        let mut resources = prism::GpuResources::new(&ctx);
+        let mut resources = prism_v1::GpuResources::new(&ctx);
 
         // Shader unique partagé par toutes les passes
 
@@ -83,12 +83,13 @@ impl Demo {
         let frag_id = vert_id; // même module WGSL pour vs_main et fs_main
 
         let surface_format = ctx.surface_format();
-        let mut pipelines = prism::PipelineManager::new(surface_format);
+        let mut pipelines = prism_v1::PipelineManager::new(surface_format);
 
         // ── Passes ───────────────────────────────────────────────────────────
-        let world = prism::WorldPass::new(&ctx, &mut resources, &mut pipelines, vert_id, frag_id)?;
-        let vfx = prism::VfxPass::new(&ctx, &mut resources, &mut pipelines, vert_id, frag_id)?;
-        let hud = prism::HudPass::new(
+        let world =
+            prism_v1::WorldPass::new(&ctx, &mut resources, &mut pipelines, vert_id, frag_id)?;
+        let vfx = prism_v1::VfxPass::new(&ctx, &mut resources, &mut pipelines, vert_id, frag_id)?;
+        let hud = prism_v1::HudPass::new(
             &ctx,
             &mut resources,
             &mut pipelines,
@@ -119,36 +120,36 @@ impl Demo {
         let h = size.height as f32;
 
         // ── Commandes WorldPass ───────────────────────────────────────────────
-        let mut world_cmds = prism::DrawCommandBuffer::new(32);
+        let mut world_cmds = prism_v1::DrawCommandBuffer::new(32);
 
         // Quad rouge centré (200×200 px)
-        world_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Quad {
+        world_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Quad {
                 pos: px_to_clip(w * 0.5 - 100.0, h * 0.5 - 100.0, w, h),
                 size: size_to_clip(200.0, 200.0, w, h),
                 rotation: 0.0,
                 color: [0.9, 0.15, 0.15, 1.0],
                 uv: None,
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 0,
         });
 
         // Hexagone vert en haut-gauche (rayon 80px)
-        world_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Polygon {
+        world_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Polygon {
                 center: px_to_clip(120.0, 120.0, w, h),
                 sides: 6,
                 radius: (80.0 / w) * 2.0,
                 color: [0.2, 0.85, 0.3, 1.0],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 0,
         });
 
         // Anneau blanc partiel en bas (arc de 0° à 210°)
-        world_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Ring {
+        world_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Ring {
                 center: px_to_clip(w * 0.5, h - 100.0, w, h),
                 inner_r: (60.0 / w) * 2.0,
                 outer_r: (90.0 / w) * 2.0,
@@ -157,75 +158,75 @@ impl Demo {
                 resolution: 48,
                 color: [0.9, 0.9, 0.9, 0.8],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 0,
         });
 
         // Croix de deux lignes jaunes
         let cross_cx = px_to_clip(w * 0.75, h * 0.5, w, h);
         let thick = (3.0 / w) * 2.0;
-        world_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Line {
+        world_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Line {
                 start: [cross_cx[0] - 0.1, cross_cx[1]],
                 end: [cross_cx[0] + 0.1, cross_cx[1]],
                 thickness: thick,
                 color: [1.0, 0.95, 0.1, 1.0],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 0,
         });
-        world_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Line {
+        world_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Line {
                 start: [cross_cx[0], cross_cx[1] - 0.15],
                 end: [cross_cx[0], cross_cx[1] + 0.15],
                 thickness: thick,
                 color: [1.0, 0.95, 0.1, 1.0],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 0,
         });
 
         // ── Commandes VfxPass (Additive) ─────────────────────────────────────
-        let mut vfx_cmds = prism::DrawCommandBuffer::new(8);
+        let mut vfx_cmds = prism_v1::DrawCommandBuffer::new(8);
 
         // Quad orange semi-transparent centré-décalé (effet glow simulé)
-        vfx_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::Quad {
+        vfx_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::Quad {
                 pos: px_to_clip(w * 0.5 - 60.0, h * 0.5 - 60.0, w, h),
                 size: size_to_clip(120.0, 120.0, w, h),
                 rotation: std::f32::consts::FRAC_PI_4,
                 color: [1.0, 0.4, 0.0, 0.35],
                 uv: None,
             },
-            blend: prism::BlendMode::Additive,
+            blend: prism_v1::BlendMode::Additive,
             layer: 1,
         });
 
         // ── Commandes HudPass ─────────────────────────────────────────────────
-        let mut hud_cmds = prism::DrawCommandBuffer::new(16);
+        let mut hud_cmds = prism_v1::DrawCommandBuffer::new(16);
 
         // Rounded rect gris semi-transparent en haut-droit
-        hud_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::RoundedRect {
+        hud_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::RoundedRect {
                 pos: px_to_clip(w - 220.0, 20.0, w, h),
                 size: size_to_clip(200.0, 80.0, w, h),
                 radius: (8.0 / w) * 2.0,
                 segments: 4,
                 color: [0.1, 0.1, 0.1, 0.75],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 2,
         });
 
         // SlantedQuad violet
-        hud_cmds.push(prism::DrawCommand::Shape {
-            shape: prism::Shape::SlantedQuad {
+        hud_cmds.push(prism_v1::DrawCommand::Shape {
+            shape: prism_v1::Shape::SlantedQuad {
                 pos: px_to_clip(w - 215.0, 30.0, w, h),
                 size: size_to_clip(150.0, 20.0, w, h),
                 skew: (6.0 / w) * 2.0,
                 color: [0.6, 0.1, 0.9, 0.9],
             },
-            blend: prism::BlendMode::Alpha,
+            blend: prism_v1::BlendMode::Alpha,
             layer: 2,
         });
 
@@ -242,7 +243,7 @@ impl Demo {
 
         let mut encoder = self.ctx.create_encoder("demo_frame");
 
-        let mut world_input = prism::WorldInput {
+        let mut world_input = prism_v1::WorldInput {
             commands: &mut world_cmds,
             camera: Mat4::identity(),
         };
@@ -256,7 +257,7 @@ impl Demo {
             &self.resources,
         );
 
-        let mut vfx_input = prism::VfxInput {
+        let mut vfx_input = prism_v1::VfxInput {
             commands: &vfx_cmds,
             camera: Mat4::identity(),
         };
@@ -270,7 +271,7 @@ impl Demo {
             &self.resources,
         );
 
-        let mut hud_input = prism::HudInput {
+        let mut hud_input = prism_v1::HudInput {
             commands: &mut hud_cmds,
             camera: Mat4::identity(),
         };

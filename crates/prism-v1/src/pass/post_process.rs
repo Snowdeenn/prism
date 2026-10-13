@@ -1,11 +1,10 @@
 use crate::{
     GpuResources,
-    bindings::*,
     context::GpuContext,
     errors::PassError,
     pass::{Pass, PostProcessInput},
-    pipeline::*,
 };
+use prism_v2::{bindings::*, pipeline::*};
 use std::{ops::Deref, sync::Arc};
 use utils::ids::ShaderId;
 
@@ -34,7 +33,7 @@ pub struct PostProcessPass {
 }
 impl PostProcessPass {
     fn schema() -> BindingSchema {
-        let mut schema = crate::render::FullscreenEffect::source_schema();
+        let mut schema = prism_v2::render::FullscreenEffect::source_schema();
         schema.groups.push(GroupSchema {
             index: 1,
             entries: vec![BindingEntryDesc {

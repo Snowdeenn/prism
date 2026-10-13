@@ -1,4 +1,4 @@
-use crate::bindings::{BindingEntryDesc, BindingKind, BindingSchema, GroupSchema};
+use prism_v2::bindings::{BindingEntryDesc, BindingKind, BindingSchema, GroupSchema};
 use std::collections::HashMap;
 use std::sync::Arc;
 use utils::ids::ShaderId;
@@ -49,7 +49,7 @@ pub enum VertexFormat {
 
 /// Compatibility facade backed by the V2 structural caches.
 pub struct PipelineManager {
-    cache: Option<crate::pipeline::PipelineCache>,
+    cache: Option<prism_v2::pipeline::PipelineCache>,
     device: Option<wgpu::Device>,
     layouts: HashMap<PipelineKey, Vec<wgpu::BindGroupLayout>>,
     surface_format: wgpu::TextureFormat,
@@ -70,7 +70,7 @@ impl PipelineManager {
         key: PipelineKey,
     ) -> Result<Arc<wgpu::RenderPipeline>, PipelineError> {
         if self.device.as_ref() != Some(&ctx.device) {
-            self.cache = Some(crate::pipeline::PipelineCache::new(&ctx.device));
+            self.cache = Some(prism_v2::pipeline::PipelineCache::new(&ctx.device));
             self.device = Some(ctx.device.clone());
             self.layouts.clear();
         }
@@ -88,23 +88,23 @@ impl PipelineManager {
                 })?;
         let schema = Self::schema(&key);
         let vertex_layout = Self::vertex_layout(key.vertex_format);
-        let full_key = crate::pipeline::PipelineKey {
-            vertex: crate::pipeline::ShaderStageKey::new(
-                crate::pipeline::ShaderRevisionKey {
+        let full_key = prism_v2::pipeline::PipelineKey {
+            vertex: prism_v2::pipeline::ShaderStageKey::new(
+                prism_v2::pipeline::ShaderRevisionKey {
                     shader: key.vertex_shader,
                     revision: vertex.revision,
                 },
                 "vs_main",
             ),
-            fragment: Some(crate::pipeline::ShaderStageKey::new(
-                crate::pipeline::ShaderRevisionKey {
+            fragment: Some(prism_v2::pipeline::ShaderStageKey::new(
+                prism_v2::pipeline::ShaderRevisionKey {
                     shader: key.fragment_shader,
                     revision: fragment.revision,
                 },
                 "fs_main",
             )),
             layout: schema.clone(),
-            vertex_layouts: vec![Some(crate::pipeline::VertexLayout {
+            vertex_layouts: vec![Some(prism_v2::pipeline::VertexLayout {
                 stride: vertex_layout.array_stride,
                 step_mode: vertex_layout.step_mode,
                 attributes: vertex_layout.attributes.to_vec(),
